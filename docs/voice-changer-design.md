@@ -474,7 +474,7 @@ That file is only a macOS metadata artifact and is not real audio.
 All commands below assume your working directory is the repository root:
 
 ```sh
-cd /Volumes/SB-XTM5/flair/software/CosyVoice
+cd /path/to/CosyVoice
 ```
 
 ### 14.2 Make sure dependencies are already installed
@@ -491,11 +491,14 @@ At minimum, the runtime here assumes:
 
 ### 14.3 Make sure the CosyVoice 3 model exists locally
 
-The runnable path described here uses:
+The runnable path described here uses a CosyVoice 3 checkpoint directory.
+It does not need to live under `pretrained_models/` specifically.
+For example, either of these layouts works:
 
 - `pretrained_models/Fun-CosyVoice3-0.5B`
+- `checkpoints/Fun-CosyVoice3-0.5B`
 
-If that directory already exists, keep using it.
+If your chosen directory already exists, keep using it.
 If it does not exist, download it first.
 
 Hugging Face download:
@@ -505,7 +508,7 @@ python - <<'PY'
 from huggingface_hub import snapshot_download
 snapshot_download(
     'FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
-    local_dir='pretrained_models/Fun-CosyVoice3-0.5B',
+    local_dir='checkpoints/Fun-CosyVoice3-0.5B',
 )
 PY
 ```
@@ -517,7 +520,7 @@ python - <<'PY'
 from modelscope import snapshot_download
 snapshot_download(
     'FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
-    local_dir='pretrained_models/Fun-CosyVoice3-0.5B',
+    local_dir='checkpoints/Fun-CosyVoice3-0.5B',
 )
 PY
 ```
@@ -545,7 +548,7 @@ sys.path.append('third_party/Matcha-TTS')
 
 from cosyvoice.cli.cosyvoice import AutoModel
 
-model_dir = 'pretrained_models/Fun-CosyVoice3-0.5B'
+model_dir = 'checkpoints/Fun-CosyVoice3-0.5B'
 source_audio = './data/input_audio.wav'
 ref_audio = './data/ref_voice.mp3'
 
