@@ -9,6 +9,7 @@ __pycache__/
 
 # PyCharm files
 .idea
+.venv310/
 
 # Eclipse Project settings
 *.*project
@@ -38,6 +39,8 @@ data/*
 !data/ref_voice.mp3
 raw_wav
 tensorboard
+tmp/
+checkpoints/
 **/*build*
 
 # Clangd files
