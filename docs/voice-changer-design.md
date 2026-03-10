@@ -455,7 +455,211 @@ If `ref_audio` is too short, too noisy, or heavily expressive, target speaker co
 Very long audio should be segmented and stitched externally or in a thin wrapper because the tokenizer path is not meant for a single >30s chunk.
 
 
-## 14. Final recommendation
+## 14. How to run the voice changer
+
+This repository already contains sample audio files that are ready to use for the existing VC pipeline:
+
+- `./data/input_audio.wav`
+  - use this as `source_audio`
+  - this is the speech whose words, phrasing, and rough cadence will be preserved
+- `./data/ref_voice.mp3`
+  - use this as `ref_audio`
+  - this is the target voice sample whose speaker identity will be transferred
+
+Ignore `./data/._input_audio.wav`.
+That file is only a macOS metadata artifact and is not real audio.
+
+### 14.1 Run from the repository root
+
+All commands below assume your working directory is the repository root:
+
+```sh
+cd /Volumes/SB-XTM5/flair/software/CosyVoice
+```
+
+### 14.2 Make sure dependencies are already installed
+
+Use the normal CosyVoice environment described in the main README.
+If you have already run CosyVoice inference before, you can usually skip this step.
+
+At minimum, the runtime here assumes:
+
+- Python can import `torch`
+- Python can import `torchaudio`
+- Python can import `cosyvoice`
+- the local checkout includes `third_party/Matcha-TTS`
+
+### 14.3 Make sure the CosyVoice 3 model exists locally
+
+The runnable path described here uses:
+
+- `pretrained_models/Fun-CosyVoice3-0.5B`
+
+If that directory already exists, keep using it.
+If it does not exist, download it first.
+
+Hugging Face download:
+
+```sh
+python - <<'PY'
+from huggingface_hub import snapshot_download
+snapshot_download(
+    'FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
+    local_dir='pretrained_models/Fun-CosyVoice3-0.5B',
+)
+PY
+```
+
+ModelScope download:
+
+```sh
+python - <<'PY'
+from modelscope import snapshot_download
+snapshot_download(
+    'FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
+    local_dir='pretrained_models/Fun-CosyVoice3-0.5B',
+)
+PY
+```
+
+### 14.4 Verify that the bundled sample audio files are present
+
+Before running inference, confirm that the repo already has the two audio files this document uses:
+
+```sh
+ls -lh ./data/input_audio.wav ./data/ref_voice.mp3
+```
+
+Those are the exact files that should be plugged into the existing VC path.
+
+### 14.5 Run the existing VC pipeline with the bundled sample files
+
+The simplest ready-to-run command is a one-shot Python script:
+
+```sh
+python - <<'PY'
+import sys
+import torchaudio
+
+sys.path.append('third_party/Matcha-TTS')
+
+from cosyvoice.cli.cosyvoice import AutoModel
+
+model_dir = 'pretrained_models/Fun-CosyVoice3-0.5B'
+source_audio = './data/input_audio.wav'
+ref_audio = './data/ref_voice.mp3'
+
+cosyvoice = AutoModel(model_dir=model_dir)
+
+for i, result in enumerate(
+    cosyvoice.inference_vc(source_audio, ref_audio, stream=False)
+):
+    output_path = f'./data/voice_changed_{i}.wav'
+    torchaudio.save(output_path, result['tts_speech'], cosyvoice.sample_rate)
+    print(output_path)
+PY
+```
+
+This is the direct mapping from the design to the implementation:
+
+- `source_audio = ./data/input_audio.wav`
+- `ref_audio = ./data/ref_voice.mp3`
+- `cosyvoice.inference_vc(source_audio, ref_audio, stream=False)`
+- save output to `./data/voice_changed_0.wav`
+
+### 14.6 What happens step by step when you run that command
+
+1. `AutoModel(model_dir=...)` loads the frozen CosyVoice 3 inference stack.
+2. `inference_vc(source_audio, ref_audio, ...)` calls `frontend_vc(...)`.
+3. `frontend_vc(...)` loads `source_audio` and `ref_audio`.
+4. `ref_audio` is used to extract:
+   - prompt speech tokens
+   - prompt speech features / mel-style conditioning
+   - speaker embedding
+5. `source_audio` is used to extract:
+   - source speech tokens
+6. The runtime detects that `source_speech_token` is present and enters the VC path instead of the text-to-speech LLM path.
+7. `vc_job(...)` passes the source speech-token sequence directly into the synthesis queue.
+8. The frozen flow model converts those source tokens plus the target-speaker conditioning into acoustic features.
+9. The frozen vocoder converts those acoustic features into waveform samples.
+10. `torchaudio.save(...)` writes the converted result to `./data/voice_changed_0.wav`.
+
+Operationally, this means:
+
+- content comes mainly from `source_audio`
+- target speaker identity comes from `ref_audio`
+- timing and cadence are usually similar to `source_audio`
+- timing is not guaranteed to be exactly identical
+
+### 14.7 Expected output
+
+For the bundled sample files, the first output file will normally be:
+
+- `./data/voice_changed_0.wav`
+
+If the generator yields more than one result, the script will also create:
+
+- `./data/voice_changed_1.wav`
+- `./data/voice_changed_2.wav`
+- and so on
+
+In the common non-streaming case, you should expect a single file.
+
+### 14.8 Optional: adjust runtime behavior
+
+The current VC API already exposes two useful controls:
+
+- `stream=False`
+  - recommended default for offline conversion
+- `speed=1.0`
+  - keep at `1.0` unless you explicitly want faster or slower output pacing
+
+Example:
+
+```python
+cosyvoice.inference_vc(source_audio, ref_audio, stream=False, speed=1.0)
+```
+
+For the feature described in this document, `stream=False` and `speed=1.0` should be treated as the default product behavior.
+
+### 14.9 Optional fallback if MP3 decoding is unavailable
+
+If your local `torchaudio` build cannot decode MP3, convert the reference file once and use WAV instead:
+
+```sh
+ffmpeg -i ./data/ref_voice.mp3 ./data/ref_voice.wav
+```
+
+Then change the run command to:
+
+```python
+ref_audio = './data/ref_voice.wav'
+```
+
+The rest of the pipeline stays exactly the same.
+
+### 14.10 Practical constraints while running it
+
+The current tokenizer path does not support extracting speech tokens from a single audio chunk longer than `30s`.
+
+So in practice:
+
+- the bundled sample files are the easiest ready-to-go demo path
+- short single-utterance source audio is the safe default
+- long source audio should be segmented before conversion if you want production robustness
+
+### 14.11 Minimal success criterion
+
+The run should be considered successful if:
+
+- the command finishes without raising an exception
+- `./data/voice_changed_0.wav` is written
+- the output says the same words as `./data/input_audio.wav`
+- the output sounds like the speaker from `./data/ref_voice.mp3`
+- the output duration and phrasing are close to the source, even if not exact
+
+
+## 15. Final recommendation
 
 Treat the **existing VC pipeline** as the feature.
 
